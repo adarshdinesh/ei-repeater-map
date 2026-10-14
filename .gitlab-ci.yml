@@ -1,0 +1,25 @@
+# GitLab Pages: publishes the static site on every push to the default branch.
+# Optional: add a pipeline schedule (Build → Pipeline schedules, e.g. weekly)
+# and the refresh-data job will rebuild data/repeaters.js from IRTS first.
+stages: [build, deploy]
+
+refresh-data:
+  stage: build
+  image: python:3.12-alpine
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  script:
+    - python3 tools/update_repeaters.py
+  artifacts:
+    paths: [data/repeaters.js]
+
+pages:
+  stage: deploy
+  image: alpine:3.20
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - mkdir -p public
+    - cp -r index.html css js data samples public/
+  artifacts:
+    paths: [public]

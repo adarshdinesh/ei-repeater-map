@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Irish Repeater Map</title>
+  <meta name="description" content="Map every amateur radio repeater in Ireland and check line of sight from your location over real terrain.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3v26M9 29h14M16 7l-6 6M16 7l6 6' stroke='%23169b62' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <header class="brand">
+        <h1>Irish Repeater Map</h1>
+        <p class="sub">Line of sight from your location to every repeater in Ireland</p>
+      </header>
+
+      <section class="card">
+        <h2>1 · Your location</h2>
+        <form id="searchForm" class="row">
+          <input id="searchInput" type="text" placeholder="Town or village" autocomplete="off">
+          <button type="submit">Go</button>
+        </form>
+        <div class="row">
+          <button id="locateBtn" type="button">Use my location</button>
+          <button id="pickBtn" type="button" class="ghost">Pick on map</button>
+        </div>
+        <p class="hint">Or right-click (long-press) the map. Drag the house to move it.</p>
+        <p id="homeInfo" class="home-info">No location set yet.</p>
+      </section>
+
+      <section class="card">
+        <h2>2 · Station</h2>
+        <div class="grid2">
+          <label>Your antenna height (m)<input id="txAgl" type="number" min="0" max="200" step="1" value="3"></label>
+          <label>Repeater mast height (m)<input id="rxAgl" type="number" min="0" max="300" step="1" value="15"></label>
+          <label>Your power (W)<input id="powerW" type="number" min="0.1" max="100" step="0.5" value="5"></label>
+          <label>Your antenna gain (dBi)<input id="gainDbi" type="number" min="-10" max="15" step="0.5" value="0"></label>
+        </div>
+        <label>Extra losses: cable, walls, fading (dB)<input id="extraLoss" type="number" min="0" max="40" step="1" value="10"></label>
+        <p class="hint">Ground floor ≈ 2 m, each storey ≈ 3 m. Handheld antenna ≈ −3 dBi, roof mobile/collinear ≈ 2–6 dBi.</p>
+        <label>Refraction (k-factor)
+          <select id="kFactor">
+            <option value="1.333">4/3 — standard atmosphere</option>
+            <option value="1">1 — no refraction (optical)</option>
+            <option value="0.667">2/3 — pessimistic</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>3 · Repeater data</h2>
+        <p class="hint" id="dbInfo"></p>
+        <label class="file">
+          <input id="fileInput" type="file" accept=".csv,text/csv">
+          <span>Import CHIRP CSV…</span>
+        </label>
+        <div id="importInfo" class="import-info" hidden></div>
+        <label class="check" id="chirpOnlyWrap" hidden><input id="chirpOnly" type="checkbox"> Only show channels from my file</label>
+        <button id="exportBtn" type="button" class="ghost">Export shown repeaters as CHIRP CSV</button>
+      </section>
+
+      <section class="card">
+        <h2>4 · Filter</h2>
+        <div class="chips" id="bandChips"></div>
+        <div class="chips" id="statusChips"></div>
+        <div class="grid2">
+          <label>Mode
+            <select id="modeSel">
+              <option value="">All modes</option>
+              <option value="FM">FM (analogue)</option>
+              <option value="DMR">DMR</option>
+              <option value="C4FM">C4FM / Fusion</option>
+              <option value="D-STAR">D-STAR</option>
+              <option value="NXDN">NXDN</option>
+            </select>
+          </label>
+          <label>Max distance <output id="maxDistOut">any</output>
+            <input id="maxDist" type="range" min="10" max="500" step="10" value="500">
+          </label>
+        </div>
+        <input id="textFilter" type="search" placeholder="Search callsign, site, county…">
+        <div class="row wrap">
+          <label class="check"><input id="showOff" type="checkbox"> Include off-air</label>
+          <label class="check"><input id="showUnlikelyLines" type="checkbox" checked> Lines to unlikely sites</label>
+          <label class="check"><input id="showLabels" type="checkbox" checked> Callsign labels</label>
+        </div>
+      </section>
+
+      <section class="card list-card">
+        <div class="list-head">
+          <h2 id="listTitle">Repeaters</h2>
+          <span id="progress" class="progress"></span>
+        </div>
+        <label class="sort">Sort by
+          <select id="sortSel">
+            <option value="signal">Signal at repeater (best first)</option>
+            <option value="distance">Distance (nearest first)</option>
+            <option value="freq">Frequency</option>
+          </select>
+        </label>
+        <div id="summary" class="summary"></div>
+        <ol id="list" class="list"></ol>
+      </section>
+
+      <footer class="foot">
+        Repeater data: <a href="https://irts.ie/cgi/repeater.cgi" target="_blank" rel="noopener">IRTS</a>.
+        Terrain: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a>.
+        Signal estimates use terrain only: trees, buildings and exact site positions all matter.
+      </footer>
+    </aside>
+
+    <main class="main">
+      <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-controls="sidebar">☰ Panel</button>
+      <div id="map"></div>
+      <div id="cursor" class="cursor">Move over the map for elevation</div>
+      <section id="profilePanel" class="profile" hidden>
+        <div class="profile-head">
+          <div>
+            <strong id="profTitle"></strong>
+            <div id="profStats" class="prof-stats"></div>
+          </div>
+          <button id="profClose" type="button" class="ghost" aria-label="Close profile">✕</button>
+        </div>
+        <canvas id="profCanvas"></canvas>
+        <div class="legend">
+          <span><i class="sw terrain"></i>Terrain + Earth curvature</span>
+          <span><i class="sw line"></i>Radio path</span>
+          <span><i class="sw fres"></i>60% Fresnel zone</span>
+          <span><i class="sw blk"></i>Obstruction</span>
+          <span><i class="sw edge"></i>Diffraction edge (dB lost)</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="data/repeaters.js"></script>
+  <script src="js/geo.js"></script>
+  <script src="js/terrain.js"></script>
+  <script src="js/terrainlayers.js"></script>
+  <script src="js/los.js"></script>
+  <script src="js/chirp.js"></script>
+  <script src="js/profile.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

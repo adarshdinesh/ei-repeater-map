@@ -1,0 +1,59 @@
+# Refreshes the repeater data from IRTS every week, commits it if anything
+# changed, and deploys the site to GitHub Pages. Also deploys on every push.
+#
+# One-time setup: Settings → Pages → Build and deployment → Source: "GitHub Actions".
+# Run it by hand any time from the Actions tab → "Update data and deploy" → Run workflow.
+name: Update data and deploy
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 1" # Mondays 05:17 UTC (off the hour, when GitHub is less busy)
+  workflow_dispatch:
+
+permissions:
+  contents: write # commit refreshed data
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refresh repeater data from IRTS
+        if: github.event_name != 'push'
+        continue-on-error: true # if IRTS is down, keep and deploy the current data
+        run: python3 tools/update_repeaters.py
+
+      - name: Commit data if repeaters changed
+        if: github.event_name != 'push'
+        run: |
+          # Ignore the "updated" date line so a run with no real changes makes no commit.
+          if git diff --quiet -I '"updated":' -- data/repeaters.js; then
+            echo "No repeater changes."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "Update repeater data from IRTS"
+            git push
+          fi
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r index.html css js data samples .nojekyll _site/
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+      - id: deployment
+        uses: actions/deploy-pages@v4
